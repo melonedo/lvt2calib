@@ -77,6 +77,7 @@ double Rad_to_deg = 45.0 / atan(1.0),
 int clouds_proc_ = 0, clouds_used_ = 0;
 int acc_board_num = 0, board_used_num = 0;
 bool doAccBoards = false;
+bool if_use_single_board = true;
 
 CloudType::Ptr calib_board_bound_template (new CloudType);
 CloudType::Ptr acc_boards(new CloudType);
@@ -150,87 +151,99 @@ void callback(const PointCloud2::ConstPtr& laser_cloud)
         // if(doAccBoards && (acc_board_num < max_acc_frame_))
         if(doAccBoards)
         {
+            bool find_centers = false;
             acc_board_num++;
-            ROS_WARN("<<<<<< [%s] Accumalated %d frames of board cloud..........", ns_str.c_str(), acc_board_num);
-            *acc_boards += *calib_board;
-            
-            CloudType::Ptr voxel_filtered(new CloudType);
-            pcl::VoxelGrid<PointType> sor;
-            sor.setInputCloud(acc_boards);
-            sor.setLeafSize(voxel_grid_size_, voxel_grid_size_, voxel_grid_size_);
-            sor.filter(*voxel_filtered);
-            pcl::copyPointCloud(*voxel_filtered, *acc_boards);
 
-            CloudType::Ptr cloud_gauss_filtered (new CloudType);
-            pcl::copyPointCloud(*acc_boards, *cloud_gauss_filtered);
-            if(use_gauss_filter2_)
+            if (if_use_single_board)
             {
-                // filters for accumulated board point cloud
-                // **************** 基于高斯核函数的卷积滤波实现 *****************
-                pcl::filters::GaussianKernel<PointType, PointType> kernel;
-                kernel.setSigma(gauss_k_sigma2_);    // 高斯函数的标准方差，决定函数的宽度
-                kernel.setThresholdRelativeToSigma(gauss_k_thre_rt_sigma2_); //　设置相对sigma参数的距离阈值
-                kernel.setThreshold(gauss_k_thre2_); //　设置距离阈值，若点间距离大于阈值则不予考虑
-                // cout << "Kernel made" << endl;
-
-                pcl::search::KdTree<PointType>::Ptr gauss_tree(new pcl::search::KdTree<PointType>);
-                gauss_tree->setInputCloud(acc_boards);
-                // cout << "KdTree made" << endl;
-                
-                // *************** 设置Convolution相关参数 *****************
-                pcl::filters::Convolution3D<PointType, PointType, pcl::filters::GaussianKernel<PointType, PointType>> convolution;
-                convolution.setKernel(kernel); // 设置卷积核
-                convolution.setInputCloud(acc_boards);
-                convolution.setNumberOfThreads(8);
-                convolution.setSearchMethod(gauss_tree);
-                convolution.setRadiusSearch(gauss_conv_radius2_);
-                // cout << "Convolution start" << endl;
-
-                convolution.convolve(*cloud_gauss_filtered);
-                // cout << "cluster size after gauss filter: " << cloud_gauss_filtered->points.size() << endl;
-                // if(auto_mode_) showPointXYZI(cloud_gauss_filtered, 1, "after gauss filter");
-                // pcl::copyPointCloud(*cloud_gauss_filtered, *acc_boards);
-                
-                CloudType::Ptr voxel2_filtered(new CloudType);
-                pcl::VoxelGrid<PointType> sor2;
-                sor2.setInputCloud(cloud_gauss_filtered);
-                sor2.setLeafSize(voxel_grid_size_, voxel_grid_size_, voxel_grid_size_);
-                sor2.filter(*voxel2_filtered);
-                pcl::copyPointCloud(*voxel2_filtered, *cloud_gauss_filtered);
-
-                CloudType::Ptr cloud_s_filtered(new CloudType);
-                pcl::StatisticalOutlierRemoval<PointType> sor;
-                sor.setInputCloud(cloud_gauss_filtered);
-                sor.setMeanK(sor_MeanK_);
-                sor.setStddevMulThresh(sor_StddevMulThresh_);
-                sor.filter(*cloud_s_filtered);
-                pcl::copyPointCloud(*cloud_s_filtered, *cloud_gauss_filtered);
-
-                sensor_msgs::PointCloud2 acc_boards_filterd_ros;
-                pcl::toROSMsg(*cloud_gauss_filtered, acc_boards_filterd_ros);
-                acc_boards_filterd_ros.header = laser_cloud->header;
-                acc_boards_filterd_pub.publish(acc_boards_filterd_ros);	// topic: /livox_pattern/acc_boards_filtered
+                // use single frame board to extract circle centers
+                find_centers = myFourCenters.FindFourCenters(calib_board_bound_template, four_circle_centers, myDetector.Tr_calib2tpl_.inverse());
             }
-
-            sensor_msgs::PointCloud2 acc_boards_ros;
-            pcl::toROSMsg(*acc_boards, acc_boards_ros);
-            acc_boards_ros.header = laser_cloud->header;
-            acc_boards_pub.publish(acc_boards_ros);		// topic: /livox_pattern/acc_boards
-
-            // myDetector.isCalibBoard(acc_boards, calib_board_bound_template, acc_calib_boundary_registed);
-            if(myDetector.isCalibBoard(cloud_gauss_filtered, acc_calib_boundary, acc_calib_boundary_registed))
+            else
             {
-                Eigen::Matrix4f Tr_calib2tpl = myDetector.Tr_ukn2tpl_;  
+                ROS_WARN("<<<<<< [%s] Accumalated %d frames of board cloud..........", ns_str.c_str(), acc_board_num);
+                *acc_boards += *calib_board;
 
-                sensor_msgs::PointCloud2 acc_boards_bound_registed_ros;
-                pcl::toROSMsg(*acc_calib_boundary_registed, acc_boards_bound_registed_ros);
-                acc_boards_bound_registed_ros.header = laser_cloud->header;
-                acc_boards_bound_registed_pub.publish(acc_boards_bound_registed_ros);	// topic: /livox_pattern/acc_boards_bound_registed
+                CloudType::Ptr voxel_filtered(new CloudType);
+                pcl::VoxelGrid<PointType> sor;
+                sor.setInputCloud(acc_boards);
+                sor.setLeafSize(voxel_grid_size_, voxel_grid_size_, voxel_grid_size_);
+                sor.filter(*voxel_filtered);
+                pcl::copyPointCloud(*voxel_filtered, *acc_boards);
 
-                bool find_centers = myFourCenters.FindFourCenters(calib_board_bound_template, four_circle_centers, Tr_calib2tpl.inverse());
-                // bool find_centers = myFourCenters.FindFourCenters(acc_calib_boundary, four_circle_centers, Eigen::Matrix4f::Identity());
+                CloudType::Ptr cloud_gauss_filtered(new CloudType);
+                pcl::copyPointCloud(*acc_boards, *cloud_gauss_filtered);
+                if (use_gauss_filter2_)
+                {
+                    // filters for accumulated board point cloud
+                    // **************** 基于高斯核函数的卷积滤波实现 *****************
+                    pcl::filters::GaussianKernel<PointType, PointType> kernel;
+                    kernel.setSigma(gauss_k_sigma2_);                            // 高斯函数的标准方差，决定函数的宽度
+                    kernel.setThresholdRelativeToSigma(gauss_k_thre_rt_sigma2_); // 　设置相对sigma参数的距离阈值
+                    kernel.setThreshold(gauss_k_thre2_);                         // 　设置距离阈值，若点间距离大于阈值则不予考虑
+                    // cout << "Kernel made" << endl;
 
-                if(find_centers) board_used_num++;
+                    pcl::search::KdTree<PointType>::Ptr gauss_tree(new pcl::search::KdTree<PointType>);
+                    gauss_tree->setInputCloud(acc_boards);
+                    // cout << "KdTree made" << endl;
+
+                    // *************** 设置Convolution相关参数 *****************
+                    pcl::filters::Convolution3D<PointType, PointType, pcl::filters::GaussianKernel<PointType, PointType>> convolution;
+                    convolution.setKernel(kernel); // 设置卷积核
+                    convolution.setInputCloud(acc_boards);
+                    convolution.setNumberOfThreads(8);
+                    convolution.setSearchMethod(gauss_tree);
+                    convolution.setRadiusSearch(gauss_conv_radius2_);
+                    // cout << "Convolution start" << endl;
+
+                    convolution.convolve(*cloud_gauss_filtered);
+                    // cout << "cluster size after gauss filter: " << cloud_gauss_filtered->points.size() << endl;
+                    // if(auto_mode_) showPointXYZI(cloud_gauss_filtered, 1, "after gauss filter");
+                    // pcl::copyPointCloud(*cloud_gauss_filtered, *acc_boards);
+
+                    CloudType::Ptr voxel2_filtered(new CloudType);
+                    pcl::VoxelGrid<PointType> sor2;
+                    sor2.setInputCloud(cloud_gauss_filtered);
+                    sor2.setLeafSize(voxel_grid_size_, voxel_grid_size_, voxel_grid_size_);
+                    sor2.filter(*voxel2_filtered);
+                    pcl::copyPointCloud(*voxel2_filtered, *cloud_gauss_filtered);
+
+                    CloudType::Ptr cloud_s_filtered(new CloudType);
+                    pcl::StatisticalOutlierRemoval<PointType> sor;
+                    sor.setInputCloud(cloud_gauss_filtered);
+                    sor.setMeanK(sor_MeanK_);
+                    sor.setStddevMulThresh(sor_StddevMulThresh_);
+                    sor.filter(*cloud_s_filtered);
+                    pcl::copyPointCloud(*cloud_s_filtered, *cloud_gauss_filtered);
+
+                    sensor_msgs::PointCloud2 acc_boards_filterd_ros;
+                    pcl::toROSMsg(*cloud_gauss_filtered, acc_boards_filterd_ros);
+                    acc_boards_filterd_ros.header = laser_cloud->header;
+                    acc_boards_filterd_pub.publish(acc_boards_filterd_ros); // topic: /livox_pattern/acc_boards_filtered
+                }
+
+                sensor_msgs::PointCloud2 acc_boards_ros;
+                pcl::toROSMsg(*acc_boards, acc_boards_ros);
+                acc_boards_ros.header = laser_cloud->header;
+                acc_boards_pub.publish(acc_boards_ros); // topic: /livox_pattern/acc_boards
+
+                // myDetector.isCalibBoard(acc_boards, calib_board_bound_template, acc_calib_boundary_registed);
+                if (myDetector.isCalibBoard(cloud_gauss_filtered, acc_calib_boundary, acc_calib_boundary_registed))
+                {
+                    Eigen::Matrix4f Tr_calib2tpl = myDetector.Tr_ukn2tpl_;
+
+                    sensor_msgs::PointCloud2 acc_boards_bound_registed_ros;
+                    pcl::toROSMsg(*acc_calib_boundary_registed, acc_boards_bound_registed_ros);
+                    acc_boards_bound_registed_ros.header = laser_cloud->header;
+                    acc_boards_bound_registed_pub.publish(acc_boards_bound_registed_ros); // topic: /livox_pattern/acc_boards_bound_registed
+
+                    find_centers = myFourCenters.FindFourCenters(calib_board_bound_template, four_circle_centers, Tr_calib2tpl.inverse());
+                    // bool find_centers = myFourCenters.FindFourCenters(acc_calib_boundary, four_circle_centers, Eigen::Matrix4f::Identity());
+                }
+            }
+            if(find_centers) 
+            {
+                board_used_num++;
                 ROS_WARN("<<<<<< [%s] board used num = %d", ns_str.c_str(), board_used_num);
 
                 sensor_msgs::PointCloud2 four_center_ros;
@@ -248,7 +261,6 @@ void callback(const PointCloud2::ConstPtr& laser_cloud)
 
                 if(DEBUG) ROS_INFO("Pattern centers published");
             }
-
         }
         // else if(doAccBoards)
         // {
@@ -368,6 +380,7 @@ void load_param(ros::NodeHandle& nh_)
     nh_.param("use_RG_Pseg", use_RG_Pseg, false);
     nh_.param("queue_size", queue_size_, 1);
     nh_.param<std::string>("ns", ns_str, "laser");
+    nh_.param("if_use_single_board", if_use_single_board, false);
 
     return;
 }
@@ -433,7 +446,7 @@ int main(int argc, char **argv)
     acc_boards_pub = nh_.advertise<PointCloud2>("acc_boards", 1);
     acc_boards_bound_registed_pub = nh_.advertise<PointCloud2>("acc_boards_bound_registed", 1);
     acc_boards_filterd_pub = nh_.advertise<PointCloud2>("acc_boards_filtered", 1);
-    centers_pub = nh_.advertise<lvt2calib::ClusterCentroids>("/"+ns_str+"/centers_cloud", 1);
+    centers_pub = nh_.advertise<lvt2calib::ClusterCentroids>("/"+ns_str+"/centers_cloud", 10);
     
     colored_planes_pub = nh_.advertise<PointCloud2>("colored_planes", 1);
 
@@ -462,6 +475,8 @@ int main(int argc, char **argv)
             acc_board_num = 0;
             acc_boards->clear();
             acc_boards_registed->clear();
+            centers_pub.shutdown();
+            centers_pub = nh_.advertise<lvt2calib::ClusterCentroids>("/"+ns_str+"/centers_cloud", 10);
 
             board_used_num = 0;
             clouds_proc_ = 0;

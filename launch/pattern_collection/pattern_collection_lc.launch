@@ -13,7 +13,7 @@
     <arg name="center_cam_tp" default="/$(arg ns_c)/cam_pattern/centers_cloud"/>
     <arg name="center_cam2d_tp" default="/$(arg ns_c)/cam_pattern/cam_2d_circle_center"/>
     <arg name="max_frame" default="60"/>
-    <arg name="featureFileName" default="features_info_$(arg ns_l)_to_$(arg ns_c)"/>
+    <arg name="feature_file_name" default="features_info_$(arg ns_l)_to_$(arg ns_c)"/>
 
 
     <param name="max_frame" type="int" value="$(arg max_frame)"/>
@@ -27,8 +27,8 @@
 
         <param name="ns_lv" value="$(arg ns_l)"/>
         <param name="ns_cv" value="$(arg ns_c)"/>
-        <!-- use centroid of laser patterns? default:false -->
-        <param name="useAccCenters_laser" value="false" />
+        <!-- use centroid of laser patterns? default:true -->
+        <param name="useCentroid_laser" value="true" />
 
         <!-- Save file? -->        
         <param name="save_final_data" value="true"/>
@@ -36,7 +36,7 @@
 
         <!-- File Path -->
         <param name="result_dir_" type="string" value="$(find lvt2calib)/data/pattern_collection_result/"/>
-        <param name="feature_file_name" type="string" value="$(arg featureFileName)"/>
+        <param name="feature_file_name" type="string" value="$(arg feature_file_name)"/>
     
     </node>
 </launch>

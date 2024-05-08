@@ -245,11 +245,12 @@ void image_process(cv::Mat original_image, const sensor_msgs::ImageConstPtr& ima
     namedWindow(win_raw_img);
     cv::imshow(win_raw_img, original_image);
     namedWindow(win_undist_img);
-    cv::imshow(win_undist_img, undistorted_image);
-    cv::waitKey(1);
+
     cv::Mat image_copy;
     image_copy = undistorted_image.clone();
-    
+    cv::imshow(win_undist_img, undistorted_image);
+    cv::waitKey(1);
+
     cv::Size boardSize;
     boardSize.height = 2;
     boardSize.width = 2;
@@ -306,9 +307,10 @@ void image_process(cv::Mat original_image, const sensor_msgs::ImageConstPtr& ima
     
         // Set up detector with params
         Ptr<SimpleBlobDetector> detector = SimpleBlobDetector::create(params);
-        found = findCirclesGrid(image_copy, boardSize, pointbuf, CALIB_CB_SYMMETRIC_GRID+CALIB_CB_CLUSTERING, detector);
+        found = findCirclesGrid(image_copy, boardSize, pointbuf, CALIB_CB_SYMMETRIC_GRID + CALIB_CB_CLUSTERING, detector);
 
-    #endif
+
+#endif
 
     if(found) 
     {
@@ -599,6 +601,10 @@ int main(int argc, char* argv[])
         {
             ROS_WARN("<<<<<<<<<<<< [%s] PAUSE <<<<<<<<<<<<", ns_str.c_str());
             cumulative_cloud -> clear();
+            cluster_centroids_pub.shutdown();
+            cluster_centroids_pub = nh.advertise<lvt2calib::ClusterCentroids>("centers_cloud", 1);
+            cam_2d_circle_centers_pub.shutdown();
+            cam_2d_circle_centers_pub = nh.advertise<lvt2calib::Cam2DCircleCenters>("cam_2d_circle_center", 1);
             ros::param::set("/cam_paused", true);
             while(pause_process && !end_process && ros::ok())
             {

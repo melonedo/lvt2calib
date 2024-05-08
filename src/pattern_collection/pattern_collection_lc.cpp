@@ -52,12 +52,13 @@ std::vector<pcl::PointXYZ> lv(4), camv(4);
 std::vector<cv::Point2f>  cam_2d_centers(4), cam_2d_centers_sorted(4);  // centers
 std::vector<std::vector<cv::Point2f>> acc_cv_2d(4);
 pcl::PointCloud<pcl::PointXYZ>::Ptr acc_laser_cloud, acc_camera_cloud;
+pcl::PointCloud<pcl::PointXYZ>::Ptr acc_laser_centroids_cloud, acc_camera_centroid_cloud;
 std::vector<std::vector<pcl::PointXYZ>> acc_lv(4), acc_cv(4);  // accumulate 4 center points
 
 std::vector<pcl::PointXYZ> final_centroid_acc_lv, final_centroid_acc_cv;
 std::vector<cv::Point2f> final_cam_2d_centers_sorted(4);  // centers
 
-ros::Publisher acc_laser_cloud_pub, acc_camera_pc_pub_;
+ros::Publisher acc_laser_cloud_pub, acc_camera_pc_pub_, acc_laser_centroids_cloud_pub;
 
 bool useCentroid_laser = false;
 bool save_final_data = false;
@@ -79,6 +80,14 @@ void writeCircleCenters(const char* file_name, vector<pcl::PointXYZ>& centers_v_
 void laser_callback(const lvt2calib::ClusterCentroids::ConstPtr livox_centroids)
 {
     if(DEBUG) ROS_INFO("[%s] Laser pattern ready!", ns_lv.c_str());
+    if(acc_laser_frame == 0 && livox_centroids->cluster_iterations >= max_frame)
+    {
+        cout << "[" << ns_lv << "] clear laser buffer" << endl;
+        return;
+    }
+    else if(acc_laser_frame >= max_frame)
+        return;
+
     laserReceived = true;
 
     if(DEBUG) cout << "[" << ns_lv << "] livox_centroids->cloud.size = " << livox_centroids->cloud.width << endl;
@@ -102,12 +111,21 @@ void laser_callback(const lvt2calib::ClusterCentroids::ConstPtr livox_centroids)
     acc_laser_cloud_ros.header = livox_centroids->header;
     acc_laser_cloud_pub.publish(acc_laser_cloud_ros);  // Topic: /pattern_collection/acc_laser_cloud
 
+    sensor_msgs::PointCloud2 acc_laser_cnetroids_cloud_ros;
+    pcl::toROSMsg(*acc_laser_centroids_cloud, acc_laser_cnetroids_cloud_ros);
+    acc_laser_cnetroids_cloud_ros.header = livox_centroids->header;
+    acc_laser_centroids_cloud_pub.publish(acc_laser_cnetroids_cloud_ros);  // Topic: /pattern_collection/acc_laser_centroids
+
     return;
 }
 
 void camera_callback(lvt2calib::ClusterCentroids::ConstPtr image_centroids)
 {
     if(DEBUG) ROS_INFO("[%s] Camera pattern ready!", ns_cv.c_str());
+
+    if(acc_cam_frame >= max_frame)
+        return;
+
     #ifdef TF2
 
     //TODO: adapt to ClusterCentroids
@@ -166,27 +184,35 @@ void camera_callback(lvt2calib::ClusterCentroids::ConstPtr image_centroids)
 
 void cam_2d_callback(const lvt2calib::Cam2DCircleCenters::ConstPtr cam_2d_circle_centers_msg){
   
-  if(DEBUG) ROS_INFO("[%s] Camera 2d pattern ready!", ns_cv.c_str());
-  if (cam_2d_circle_centers_msg->points.size() != 4){
-    ROS_ERROR("[%s] Not exactly 4 2d circle centers from camera!", ns_cv.c_str());
-    return;
-  }
+    if(DEBUG)
+        ROS_INFO("[%s] Camera 2d pattern ready!", ns_cv.c_str());
 
-  if(DEBUG) cout << "[" << ns_cv << "] 2d centers size:" << cam_2d_circle_centers_msg->points.size() << endl;
-  for(int i=0; i<cam_2d_circle_centers_msg->points.size(); i++){
-    cam_2d_centers[i].x = cam_2d_circle_centers_msg->points[i].x;
-    cam_2d_centers[i].y = cam_2d_circle_centers_msg->points[i].y;
-  }
+    if(acc_cam_frame >= max_frame)
+        return;
 
-  sortPatternCentersUV(cam_2d_centers, cam_2d_centers_sorted);
-  cam2dReceived = true;
+    if (cam_2d_circle_centers_msg->points.size() != 4){
+        ROS_ERROR("[%s] Not exactly 4 2d circle centers from camera!", ns_cv.c_str());
+        return;
+    }
+
+    if(DEBUG)
+        cout << "[" << ns_cv << "] 2d centers size:" << cam_2d_circle_centers_msg->points.size() << endl;
+    for (int i = 0; i < cam_2d_circle_centers_msg->points.size(); i++)
+    {
+        cam_2d_centers[i].x = cam_2d_circle_centers_msg->points[i].x;
+        cam_2d_centers[i].y = cam_2d_circle_centers_msg->points[i].y;
+    }
+
+    sortPatternCentersUV(cam_2d_centers, cam_2d_centers_sorted);
+    cam2dReceived = true;
 }
 
 void recordFeature_laser(int acc_frame)
 {
     if(!laser_end)
     {
-        acc_laser_frame = acc_frame;
+        // acc_laser_frame = acc_frame;
+        acc_laser_frame++;
         // ROS_WARN("***************************************");
         // ROS_WARN("[%s] Record Features......[FRAME: %d/%d]", ns_lv.c_str(), acc_frame, max_frame);
         ROS_WARN("[%s] Record Features......[%s: %d/%d %s: %d/%d]", ns_lv.c_str(), ns_lv.c_str(), acc_laser_frame, max_frame, ns_cv.c_str(), acc_cam_frame, max_frame);
@@ -218,7 +244,7 @@ void recordFeature_laser(int acc_frame)
                 cout << "cluster acc_lv[3] size = " << acc_lv[3].size() << endl;
             }
 
-            if(DEBUG) cout << "**** [" << ns_lv << "] A.1. get four centroid points of camera" << endl;
+            if(DEBUG) cout << "**** [" << ns_lv << "] A.1. get four centroid points of LiDAR" << endl;
             pcl::PointXYZ centroid_lv_0 = calculateClusterCentroid(acc_lv[0]);
             pcl::PointXYZ centroid_lv_1 = calculateClusterCentroid(acc_lv[1]);
             pcl::PointXYZ centroid_lv_2 = calculateClusterCentroid(acc_lv[2]);
@@ -244,9 +270,18 @@ void recordFeature_laser(int acc_frame)
                 cout << "detected_3d_lidar_wt_centroid" << it - centroid_acc_lv.begin() << "="<< "[" << (*it).x << " " << (*it).y << " " << (*it).z << "]" << endl;
             }
 
+        acc_laser_centroids_cloud->clear();
+        for (auto it = centroid_acc_lv.begin(); it < centroid_acc_lv.end(); it++)
+            acc_laser_centroids_cloud->points.push_back(*it);
+        // acc_laser_centroids_cloud->points.resize(centroid_acc_lv.size());
+        // acc_laser_centroids_cloud->width = centroid_acc_lv.size();
+        // acc_laser_centroids_cloud->height = 1;
+        // std::copy(centroid_acc_lv.begin(), centroid_acc_lv.end(), acc_laser_cloud->points.begin());
+
         std::vector<double> rmse_3d_lidar_wt_centroid;
     
-        if(acc_frame == max_frame)
+        // if(acc_frame == max_frame)
+        if(acc_laser_frame == max_frame)
         {
             laser_end = true;
             final_centroid_acc_lv = centroid_acc_lv;
@@ -434,12 +469,14 @@ int main(int argc, char **argv)
     
     acc_laser_cloud = pcl::PointCloud<pcl::PointXYZ>::Ptr(new pcl::PointCloud<pcl::PointXYZ>);
     acc_camera_cloud = pcl::PointCloud<pcl::PointXYZ>::Ptr(new pcl::PointCloud<pcl::PointXYZ>);
+    acc_laser_centroids_cloud = pcl::PointCloud<pcl::PointXYZ>::Ptr(new pcl::PointCloud<pcl::PointXYZ>);
 
-    ros::Subscriber laser_sub = nh_.subscribe<lvt2calib::ClusterCentroids>("cloud_laser", 1, laser_callback);
+    ros::Subscriber laser_sub = nh_.subscribe<lvt2calib::ClusterCentroids>("cloud_laser", 10, laser_callback);
     ros::Subscriber stereo_sub = nh_.subscribe<lvt2calib::ClusterCentroids>("cloud_cam", 1, camera_callback);
     ros::Subscriber stereo_2d_circle_centers_sub = nh_.subscribe<lvt2calib::Cam2DCircleCenters>("cloud_cam2d", 1, cam_2d_callback);
 
-    acc_laser_cloud_pub = nh_.advertise<PointCloud2>("acc_laser_centers",1);
+    acc_laser_cloud_pub = nh_.advertise<PointCloud2>("/" + ns_lv + "/acc_laser_centers",1);
+    acc_laser_centroids_cloud_pub = nh_.advertise<PointCloud2>("/" + ns_lv + "/acc_laser_centroids", 1);
 
     ROS_INFO("Initialized!");
     int posNo = 0;
@@ -448,7 +485,7 @@ int main(int argc, char **argv)
     pcl::console::TicToc t_process;
     double Process_time_ = 0.0;
 
-    ROS_WARN("<<<<<<<<<<<< [COLLECT] READY? <<<<<<<<<<<<");
+    ROS_WARN("<<<<<<<<<<<< [COLLECT] START? <<<<<<<<<<<<");
     ROS_INFO("----- If yes, please press 'Y' and 'ENTER'!");
     ROS_INFO("----- If want to quit, please press 'N' and 'ENTER'!");
     char key;
@@ -461,11 +498,9 @@ int main(int argc, char **argv)
         
         while(ros::ok())
         {
-            if(!useCentroid_laser)
-                ros::param::set("/do_acc_boards", true);
-            else
-                ros::param::set("/do_acc_boards", false);
+            ros::param::set("/do_acc_boards", true);
             ros::spinOnce();
+            bool if_end = false;
 
             if(final_saved)
             {
@@ -477,61 +512,88 @@ int main(int argc, char **argv)
                 ROS_WARN("<<<<<<<<<<<< [COLLECT] PROCESS FINISHED! <<<<<<<<<<<<");
                 ROS_WARN("<<<<<<<<<<<< COST TIME: %fs", (float) Process_time_ / 1000);
                 ROS_INFO("Have processed %d positions. Need to collect patterns in the next position?", posNo + 1);
-                ROS_INFO("-----If yes, please change the position or change the rosbag, then press 'Y' and 'ENTER'!");
-                ROS_INFO("-----If no, please press 'N' and 'ENTER' to quit the process!");
-                char key;
-                cin >> key;
-                if(key == 'Y' || key == 'y')
+                
+                while(1)
                 {
-                    ros::param::set("/pause_process", false);
-                    ROS_WARN("<<<<<<<<<<<< CHANGE POSITION <<<<<<<<<<<<");
-                    ROS_WARN("<<<<<<<<<<<< [COLLECT] READY? <<<<<<<<<<<<");
-                    ROS_INFO("----- If yes, please press 'Y' and 'ENTER'!");
-                    ROS_INFO("----- If want to quit, please press 'N' and 'ENTER'!");
+                    ROS_INFO("-----If yes, please change the position or change the rosbag, then press 'Y' and 'ENTER'!");
+                    ROS_INFO("-----If no, please press 'N' and 'ENTER' to quit the process!");
+                
                     char key;
                     cin >> key;
-                    if(key == 'Y' || key == 'y')
+                    if (key == 'Y' || key == 'y')
                     {
-                        ROS_INFO("----- Continue...");
-                        t_process.tic();
-                    }
-                    else
+                        ros::param::set("/pause_process", false);
+                        ROS_WARN("<<<<<<<<<<<< CHANGE POSITION <<<<<<<<<<<<");
+                        
+                        while(1)
+                        {
+                            ROS_WARN("<<<<<<<<<<<< [COLLECT] READY? <<<<<<<<<<<<");
+                            ROS_INFO("----- If yes, please press 'Y' and 'ENTER'!");
+                            ROS_INFO("----- If want to quit, please press 'N' and 'ENTER'!");
+
+                            char key;
+                            cin >> key;
+                            if (key == 'Y' || key == 'y')
+                            {
+                                ROS_INFO("----- Continue...");
+                                t_process.tic();
+
+                                posNo++;
+
+                                final_saved = false;
+                                acc_cam_frame = 0;
+                                acc_laser_frame = 0;
+                                acc_cv_2d[0].clear();
+                                acc_cv_2d[1].clear();
+                                acc_cv_2d[2].clear();
+                                acc_cv_2d[3].clear();
+                                acc_cv[0].clear();
+                                acc_cv[1].clear();
+                                acc_cv[2].clear();
+                                acc_cv[3].clear();
+                                acc_lv[0].clear();
+                                acc_lv[1].clear();
+                                acc_lv[2].clear();
+                                acc_lv[3].clear();
+                                acc_laser_cloud->clear();
+                                acc_camera_cloud->clear();
+
+                                laser_sub.shutdown();
+                                laser_sub = nh_.subscribe<lvt2calib::ClusterCentroids>("cloud_laser", 10, laser_callback);
+
+                                ros::param::set("/do_acc_boards", true);
+                                break;
+                            }
+                            else if(key == 'n' || key == 'N')
+                            {
+                                ROS_WARN("<<<<<<<<<<<< END <<<<<<<<<<<<");
+                                ros::param::set("/end_process", true);
+                                if_end = true;
+                                break;
+                            }
+                            else
+                            {
+                                ROS_WARN("Invalid Command! Pls Re-try.");
+                                continue;
+                            }    
+                        }
+                        break;
+                    }  
+                    else if(key == 'n' || key == 'N')
                     {
                         ROS_WARN("<<<<<<<<<<<< END <<<<<<<<<<<<");
                         ros::param::set("/end_process", true);
+                        if_end = true;
                         break;
                     }
-
-                    // ros::param::set("bag_changed", true);
-                    posNo ++;
-                    
-                    final_saved = false;
-                    acc_cam_frame = 0;
-                    acc_cv_2d[0].clear();
-                    acc_cv_2d[1].clear();
-                    acc_cv_2d[2].clear();
-                    acc_cv_2d[3].clear();
-                    acc_cv[0].clear();
-                    acc_cv[1].clear();
-                    acc_cv[2].clear();
-                    acc_cv[3].clear();
-                    acc_lv[0].clear();
-                    acc_lv[1].clear();
-                    acc_lv[2].clear();
-                    acc_lv[3].clear();
-                    acc_laser_cloud->clear();
-                    acc_camera_cloud->clear();  
-
-                    ros::param::set("/do_acc_boards", true);
-                }  
-                // else if(key == 'n' || key == 'N')
-                else
-                {
-                    ROS_WARN("<<<<<<<<<<<< END <<<<<<<<<<<<");
-                    ros::param::set("/end_process", true);
-                    break;
+                    else
+                    {
+                        ROS_WARN("Invalid Command! Pls Re-try.");
+                        continue;
+                    }
                 }
-            }   
+            }
+            if(if_end)  break;
         }
     }
     else
