@@ -148,6 +148,7 @@ include_directories(
   ${OpenCV_LIBRARIES}
   ${TinyXML_INCLUDE_DIRS}
   ${PCL_INCLUDE_DIRS}
+  ${CERES_INCLUDE_DIRS}
 )
 
 link_directories(
@@ -188,6 +189,11 @@ add_definitions(
 # target_link_libraries(${PROJECT_NAME}_node
 #   ${catkin_LIBRARIES}
 # )
+
+add_executable(gen_pcd src/gen_pcd.cpp)
+target_link_libraries(gen_pcd
+  ${PCL_LIBRARIES}
+)
 
 add_executable(point_cloud_accumulation src/point_cloud_accumulation.cpp)
 add_dependencies(point_cloud_accumulation
